@@ -7,7 +7,7 @@ Author - Rishikesh Shendkar (rishikesh.shendkar@gmail.com)
 Purpose - Used as an adapter to migrate outlook tasks to Jira.
 
 Features Implemented:
-1. Populate Jira with outlook tasks
+1. Populate Jira with Microsoft outlook tasks
 2. Check if the task is already present on Kanban board. If not, add.
 3. Save the configuration
 
