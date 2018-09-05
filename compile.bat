@@ -1,0 +1,1 @@
+pyinstaller.exe --hidden-import PyQt5.sip --icon=256x256.ico --onefile ui.py
