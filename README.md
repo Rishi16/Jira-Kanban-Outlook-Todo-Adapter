@@ -1,7 +1,7 @@
-# Jira-Outlook-Todo-Adapter
+# Jira-Kanban-Outlook-Todo-Adapter
 Purpose - Used as an adapter to migrate outlook tasks to Jira.
 
-Not all the issues you work on are logged in JIRA. Creating a custom issue in Jira is time consuming.
+Not all the issues you work on are logged on the Kanaban board in JIRA. Creating a custom issue in Jira is time consuming.
 Mostly all of the issues you work on are present in the email chain. And you usually mark those emails as todo which you want to add in the tasklist.
 This adapter fetches the subject of these todo email as summary and email body as descirption to create an issue on JIRA board.
 This adapter provides you an UI to enter the Jira Assigne ID, Jira Login ID, Jira Password, Board name, Board ID and Jira link.
