@@ -24,8 +24,9 @@ from PyQt5.QtWidgets import (QAction, QApplication, QDialog, QCheckBox,
 		QVBoxLayout, QSystemTrayIcon, QErrorMessage )
 from PyQt5.QtGui import QIcon
 from PyQt5.QtCore import (pyqtSlot, QSize, QTimer, QEventLoop)
-from configparser import (SafeConfigParser, NoOptionError, NoOptionError)
+from configparser import (SafeConfigParser, NoOptionError, NoSectionError)
 from pathlib import Path
+
 
 
 class Window(QDialog):
@@ -90,7 +91,7 @@ class Window(QDialog):
 			error_dialog = QErrorMessage(self)
 			error_dialog.showMessage('Please enter all the textfields.')
 		else:
-			configFile = open("adapter_config.ini", "rw+")
+			configFile = open("adapter_config.ini", "w")
 			configFile.truncate()
 			configFile.close()
 			config = SafeConfigParser()
@@ -151,6 +152,7 @@ class Window(QDialog):
 		self.jiraPassword.textChanged.connect(self.formCheck)
 		self.boardName.textChanged.connect(self.formCheck)
 		self.boardID.textChanged.connect(self.formCheck)
+		self.jiraLink.textChanged.connect(self.formCheck)
 		
 		hbox1 = QHBoxLayout()
 		self.oneTime = QRadioButton("One-time")
@@ -200,7 +202,7 @@ class Window(QDialog):
 			while True:
 				PyJiraOut.syncTasksToJira(self.jiraID.text(), self.jiraUsername.text(), self.jiraPassword.text(), self.boardName.text(), self.boardID.text(), self.jiraLink.text())
 				loop = QEventLoop()
-				QTimer.singleShot(180000, loop.quit)
+				QTimer.singleShot(9000000, loop.quit)
 				loop.exec_()
 		print("Success")
 
