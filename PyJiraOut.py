@@ -23,12 +23,13 @@ import sys
 import win32com.client
 # In-built Python module for suppressig the insecure request warning.
 import urllib3
+import re
 
 # This function is the main function running other functions
 def syncTasksToJira(jiraID, jiraUsername, jiraPassword, boardName, boardID, jiraLink):
 	# Configuration Start xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
 	LOGFORMAT= '[%(asctime)s - %(levelname)s: %(funcName)20s()] %(message)s'
-	logging.basicConfig(filename="jira-adapter.log",level = logging.DEBUG, format = LOGFORMAT)
+	logging.basicConfig(filename="jira-adapter.log",level = logging.INFO, format = LOGFORMAT)
 	logger = logging.getLogger('JiraOutAdapter')
 	urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
@@ -41,12 +42,14 @@ def syncTasksToJira(jiraID, jiraUsername, jiraPassword, boardName, boardID, jira
 	try:
 		jira = JIRA(options=options, basic_auth=(jiraUsername, jiraPassword))
 	except JIRAError as jex:
-		logger.exception('[JIRA EXCEPTION] - Connection Failure {0}'.format(jex))
+		errorText = jex.text.split(';')
+		logger.exception('\t\t[JIRA EXCEPTION] - Connection Failure {0} - {1}\n'.format(jex.status_code, errorText[0]))
+		print('\t\t[JIRA EXCEPTION] - Connection Failure {0} - {1}\n'.format(jex.status_code, jex.text))
 		sys.exit(-1)
 	except Exception as ex:
-		logger.exception('[EXCEPTION] - Connection Failure {0}'.format(ex))
+		logger.exception('\t\t[EXCEPTION] - Connection Failure - {0}'.format(ex))
 		sys.exit(-1)
-	# Initioalising Board
+	# Initialising Board
 	BOARD = {}
 	BOARD['ID'] = boardID 
 	BOARD['Name'] = boardName
@@ -64,11 +67,10 @@ def syncTasksToJira(jiraID, jiraUsername, jiraPassword, boardName, boardID, jira
 	defaulttaskvalues['assigneeID'] = jiraID
 	defaulttaskvalues['labels'] = ['OutlookTasks']
 
-	TaskSN = 0
-	for task in tasks:
-		TaskSN=TaskSN+1
-		print(u'ToDo Task {0}: {1} '.format(TaskSN, task.Subject))
-		logger.info(u'ToDo Task {0}: {1} '.format(TaskSN, task.Subject))
+	for taskSN, task in enumerate(tasks):
+		task.Subject = cleanse(task.Subject)
+		print(u'\tToDo Task {0}: {1} '.format(taskSN, task.Subject))
+		logger.info(u'ToDo Task {0}: {1} '.format(taskSN, task.Subject))
 		existingIssue = get_existing_workitem(jira, BOARD['ID'], task, defaulttaskvalues, customJQL=None)
 		if not existingIssue:
 			# This creates a new Incident work item on the board
@@ -86,24 +88,39 @@ def syncTasksToJira(jiraID, jiraUsername, jiraPassword, boardName, boardID, jira
 # This function archives DONE tasks older than a week
 def archive_tasks_from_done_stage(jira, project, defaulttaskvalues):
 	logger = logging.getLogger('JiraOutAdapter')
-
+	print("\nArchiving Tasks")
 	# Custom JQL to get all the issues in Done stage older than a week
 	customJQL = "project={0} and assignee={1} and labels={2} and status in (Done) and createdDate <= -1w".format( str(project), defaulttaskvalues['assigneeID'], "".join(defaulttaskvalues['labels']))
-	issues = jira.search_issues(customJQL, startAt=0, maxResults=1000)
-	if not issues:
-		logger.info('Found {0} existing issues. Checking again...'.format(len(issues)))
+	try:
 		issues = jira.search_issues(customJQL, startAt=0, maxResults=1000)
-	
-	if issues:
-		logger.info('Found {0} issues in Done stage. Checking for archive transition.'.format(len(issues)))
-		for issue in issues:
-			print(issue)
-			jira.transition_issue(issue, 'Done to Archive')
-			logger.info('Issue {0} has been archived '
-							'in Kanban board.'.format(issue))
+		if not issues:
+			logger.info('\TFound {0} existing issues. Checking again...'.format(len(issues)))
+			issues = jira.search_issues(customJQL, startAt=0, maxResults=1000)
+		
+		if issues:
+			logger.info('\tFound {0} issues in Done stage. Checking for archive transition.'.format(len(issues)))
+			for i, issue in enumerate(issues):
+				print('\tArchiving [{0}] {1}'.format(i, issue))
+				jira.transition_issue(issue, 'Done to Archive')
+				logger.info('Issue {0} has been archived '
+								'in Kanban board.'.format(issue))
+	except JIRAError as jex:
+		logger.exception('\t\t[JIRA EXCEPTION] - Archive Issues {0} - {1}\n'.format(jex.status_code, jex.text))
+		print('\t\t[JIRA EXCEPTION] - Archive Issues {0} - {1}\n'.format(jex.status_code, jex.text))
+	except Exception as ex:
+		logger.exception('\t\t[EXCEPTION] - Archive Search Issue {0}'.format(ex))
+		print(ex)
 	# Done
 
-# This method helps to find an existing tasks work item in Jira based on the task subject
+def cleanse(line):
+	line=line.replace('FW: ', '')
+	line=line.replace('RE: ', '')
+	line=re.sub(r'([^\s\w]|_)+', '', line)
+	line=line.replace('   ', ' ')
+	line=line.replace('  ', ' ')
+	return line	
+
+# This method helps to find an existing tasks work item in Jira based on the task subject	
 def get_existing_workitem(jira, project, task, defaulttaskvalues, customJQL):
 	logger = logging.getLogger('JiraOutAdapter')
 	# If this parameter was not passed, then assume we need to check whole of the project.
@@ -120,22 +137,22 @@ def get_existing_workitem(jira, project, task, defaulttaskvalues, customJQL):
 	try:
 		issues = jira.search_issues(customJQL, startAt=0, maxResults=1)
 		if not issues:
-			logger.info('Found {0} existing issues. Checking again...'.format(len(issues)))
+			logger.info('\tFound {0} existing issues. Checking again...'.format(len(issues)))
 			issues = jira.search_issues(customJQL, startAt=0, maxResults=1)
 
 		if issues:
 			if len(issues) >= 1:
-				print('Found {0} existing issue for {1}\n'.format(issues[0], task.Subject))
-				logger.info('Found {0} existing issue for {1}'.format(issues[0], task.Subject))
+				print('\tFound {0} existing issue for {1}'.format(issues[0], task.Subject))
+				logger.info('\tFound {0} existing issue for {1}'.format(issues[0], task.Subject))
 				issueExisting = issues[0]
 		else:
 			issueExisting = None
 
 	except JIRAError as jex:
-		logger.exception('[JIRA EXCEPTION] - Search Issue {0}',format(jex))
-		print(jex)
+		logger.exception('\t\t[JIRA EXCEPTION] - Search Issue {0} - {1}\n'.format(jex.status_code, jex.text))
+		print('\t\t[JIRA EXCEPTION] - Search Issue {0} - {1}\n'.format(jex.status_code, jex.text))
 	except Exception as ex:
-		logger.exception('[EXCEPTION] - Search Issue {0}',format(ex))
+		logger.exception('\t\t[EXCEPTION] - Search Issue {0}'.format(ex))
 		print(ex)
 
 	return issueExisting
@@ -175,7 +192,7 @@ def create_workitem_tasks(jira, project, task, defaulttaskvalues):
 	if defaulttaskvalues['labels']:
 		issue_dict['labels'] = defaulttaskvalues['labels']
 	else:
-		logger.warning('No label was passed. {0}'.format(task['Subject']))
+		logger.warning('No label was passed. {0}'.format(task.Subject))
 
 	# Gets assignee
 	if defaulttaskvalues['assigneeID']:
@@ -186,15 +203,15 @@ def create_workitem_tasks(jira, project, task, defaulttaskvalues):
 	try:
 		# Pass all the collected info to Jira's API to create the issue on Kanban board
 		new_issue = jira.create_issue(fields=issue_dict)
-		print('Created issue - {0}\n'.format(new_issue))
-		logger.info('Created issue - {0} for task {1}'.format(new_issue, task.Subject))
+		print('\tCreated issue - {0}\n'.format(new_issue))
+		logger.info('\tCreated issue - {0} for task {1}'.format(new_issue, task.Subject))
 	except JIRAError as jex:
 		logger.info(issue_dict)
-		logger.exception('[JIRA EXCEPTION] - {0}',format(jex))
-		print(jex)
+		logger.exception('\t\t[JIRA EXCEPTION] Create issue - {0} - {1}\n'.format(jex.status_code, jex.text))
+		print('\t\t[JIRA EXCEPTION] Create issue - {0} - {1}\n'.format(jex.status_code, jex.text))
 	except Exception as ex:
 		logger.info(issue_dict)
-		logger.exception('[EXCEPTION] - {0}',format(ex))
+		logger.exception('\t\t[EXCEPTION] Create issue - {0}'.format(ex))
 		print(ex)
 
 	return new_issue
@@ -203,28 +220,70 @@ def create_workitem_tasks(jira, project, task, defaulttaskvalues):
 def transit_tasks_to_done_stage(jira, project, defaulttaskvalues, todo_items):
 	logger = logging.getLogger('JiraOutAdapter')
 	# Fecthing Completed tasks only
+	#issue = jira.issue(project)
+	#transitions = jira.transitions(issue)
+	#[(t['id'], t['name']) for t in transitions]
+	print('\nTransiting Completed Tasks')
 	tasks = todo_items.Restrict("[Complete] = TRUE")
-	for task in tasks:
+	for i,task in enumerate(tasks):
+		task.Subject = cleanse(task.Subject)
+		print("\t[{0}] {1}".format(i,task.Subject))
 		customJQL = "project={0} and assignee={1} and labels={2} and summary ~ '{3}' and " \
 						"status not in (Closed, Archive)".format(str(project),defaulttaskvalues['assigneeID'], "".join(defaulttaskvalues['labels']), task.Subject)
 		try:
 			issues = jira.search_issues(customJQL, startAt=0, maxResults=10)
 			if not issues:
-				logger.info('Found {0} existing issues. Checking again...'.format(len(issues)))
+				logger.info('\tFound {0} existing issues. Checking again...'.format(len(issues)))
 				issues = jira.search_issues(customJQL, startAt=0, maxResults=10)
 	
 			if issues:
-				for issue in issues:
-					jira.transition_issue(issue, transition='Move From NS to WIP')
-					jira.transition_issue(issue, transition='WIP to Ready')
-					jira.transition_issue(issue, transition='Ready to Done')
+				for i, issue in enumerate(issues):
+					try:
+						print("\t\t Transitioning from NS to WIP")
+						jira.transition_issue(issue, transition='Move From NS to WIP')
+						print("\t\t Transitioned from NS to WIP")
+					except JIRAError as jex:
+						logger.exception('\t\t[JIRA EXCEPTION] - {2} - NS to WIP - {0} - {1}\n'.format(jex.status_code, jex.text, issue))
+						print('\t\t[JIRA EXCEPTION] - {2} - Transition to Done - {0} - {1}\n'.format(jex.status_code, jex.text, issue))
+					except Exception as ex:
+						logger.exception('\t\t[EXCEPTION] Transition to Done - {0}'.format(ex))
+						print('\t\t[EXCEPTION] Transition to Done - {0}'.format(ex))
+					try:
+						print("\t\t Transitioning from Deffered to WIP")
+						jira.transition_issue(issue, transition='Deferred to WIP')
+						print("\t\t Transitioned from Deffered to WIP")
+					except JIRAError as jex:
+						print('\t\t[JIRA EXCEPTION] - {2} - Transition to Done - {0} - {1}\n'.format(jex.status_code, jex.text, issue))
+						logger.exception('\t\t[JIRA EXCEPTION] - {2} - Deferred to WIP- {0} - {1}\n'.format(jex.status_code, jex.text, issue))
+					except Exception as ex:
+						logger.exception('\t\t[EXCEPTION] Transition to Done - {0}'.format(ex))
+						print('\t\t[EXCEPTION] Transition to Done - {0}'.format(ex))
+					try:
+						print("\t\t Transitioning from WIP to READY")
+						jira.transition_issue(issue, transition='WIP to Ready')
+						print("\t\t Transitioned from WIP to READY")
+					except JIRAError as jex:
+						logger.exception('\t\t[JIRA EXCEPTION] - {2} - WIP to Ready - {0} - {1}\n'.format(jex.status_code, jex.text, issue))
+						print('\t\t[JIRA EXCEPTION] - {2} - Transition to Done - {0} - {1}\n'.format(jex.status_code, jex.text, issue))
+					except Exception as ex:
+						logger.exception('\t\t[EXCEPTION] Transition to Done - {0}'.format(ex))
+						print('\t\t[EXCEPTION] Transition to Done - {0}'.format(ex))
+					try:
+						print("\t\t Transitioning from Ready to Done")
+						jira.transition_issue(issue, transition='Ready to Done')
+						print("\t\t Transitioned from Ready to Done")
+					except JIRAError as jex:
+						logger.exception('\t\t[JIRA EXCEPTION] - {2} - Ready to Done - {0} - {1}\n'.format(jex.status_code, jex.text, issue))
+						print('\t\t[JIRA EXCEPTION] - {2} - Transition to Done - {0} - {1}\n'.format(jex.status_code, jex.text, issue))
+					except Exception as ex:
+						logger.exception('\t\t[EXCEPTION] Transition to Done - {0}'.format(ex))
+						print('\t\t[EXCEPTION] Transition to Done - {0}'.format(ex))
 					logger.info('Issue {0} has been archived '
-									'in Kanban board.'.format(issue))
-	
+									'in Kanban board.'.format(issue))	
 		except JIRAError as jex:
-			logger.exception('[JIRA EXCEPTION] - {0}',format(jex))
-			print(jex)
+			logger.exception('\t\t[JIRA EXCEPTION] Transition to Done - {0} - {1}\n'.format(jex.status_code, jex.text, issue))
+			print('\t\t[JIRA EXCEPTION] Transition to Done - {0} - {1}\n'.format(jex.status_code, jex.text, issue))
 		except Exception as ex:
-			logger.exception('[EXCEPTION] - {0}',format(ex))
-			print(ex)	
+			logger.exception('\t\t[EXCEPTION] Transition to Done - {0}'.format(ex))
+			print('\t\t[EXCEPTION] Transition to Done - {0}'.format(ex))	
 	# Done
